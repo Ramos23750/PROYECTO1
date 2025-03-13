@@ -1,0 +1,200 @@
+;
+/*Universidad del Valle de Guatemala
+IE2023: Programación de Microcontroladores
+Autor: Diego Alejandro Ramos Rodas
+Proyecto: PROYECTO NO.1 RELOJ
+Hardware: ATMega328P
+Creado: 03-03-2025
+Modificado: 03-03-2025
+Descripción: Requisitos del reloj
+• Reloj digital que muestre la hora y los minutos (formato de 24 horas, al menos x4 displays
+de 7 segmentos)
+• Debe de poseer un sistema de alarma (audible) donde se pueda configurar la hora y
+minutos.
+• La configuración de la hora debe hacer overflow y underflow:
+o Si está configurando la hora y el valor de minutos está en 3 se puede hacer la
+siguiente secuencia: 03 ? 02 ? 01 ? 00 ? 59 ? 58 ? 57
+o La misma funcionalidad debe verse en las horas, días, meses y en la configuración
+de la alarma en horas y minutos
+• Los dos puntos del centro deben parpadear cada 500ms (implementados con LEDs ó con
+los 7 segmentos)
+• Los displays deben estar multiplexados
+• Función de fecha:
+o El reloj debe poder desplegar la fecha en formato: 28/02 (28 de febrero)
+(Recuerde que cada mes tiene distinta cantidad de días)
+• Cuando se esté en modo de configuración (de hora, fecha ó alarma) deberá haber alguna
+indicación de que se está en ese modo (LED, parpadeo de los dígitos, etc)
+• El reloj debe funcionar de forma similar a un reloj de pulsera, i.e. los botones funcionan
+de forma presionar-y-soltar (antirebotes)
+• Tienen que utilizar al menos el Timer0 del Atmega328P y sus respectivas interrupciones
+o Puede implementar otros timers y otras interrupciones si lo desea
+• Los push-buttons deberán utilizar interrupciones pin-change.
+*/
+/////////////Encabezado///////////
+.include "M328PDEF.INC"
+/*.org SRAM_START
+COUNTUNIT_S: .byte 1
+COUNTDEC_S: .byte 1
+COUNTUNIT_MIN: .byte 1
+COUNTDEC_MIN: .byte 1
+COUNTUNIT_H: .byte 1
+COUNTDEC_H: .byte 1
+UDIA: .byte 1
+DDIA: .byte 1
+L_DIA: .byte 1
+UMES .byte 1
+DMES .byte 1
+*/
+////////////STCK PNTR////////////
+START:
+	LDI R16, LOW(RAMEND)
+	OUT SPL, R16
+	LDI R17, HIGH(RAMEND)
+	OUT SPH, R17
+	TABLADEC: .db 0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x67
+	TABLAMES: .db 0x31, 0x28, 0x31, 0x30 ,0x31, 0x30, 0x31, 0x31, 0x30, 0x31, 0x30, 0x31
+.cseg
+.org 0x0000
+	JMP START
+.org OVF0addr
+	JMP TIMR0_INT
+.def COUNTUNIT_S = R21
+.def COUNTDEC_S = R22
+.def COUNTUNIT_MIN = R23
+.def COUNTDEC_MIN = R24
+.def COUNTUNIT_H = R25
+.def COUNTDEC_H = R26
+.def UDIA = R27
+.def DDIA = R28
+.def L_DIA = R29
+.def UMES = R30
+.def DMES = R31
+////////////SETUP////////////////
+SETUP:
+	CLI
+	///TIMER///
+	LDI R16, (1<<CLKPCE)
+	STS CLKPR, R16
+	LDI R16, 0b00000100
+	STS CLKPR, R16
+	LDI R16, (1 << CS01) | (1 << CS00)
+	OUT TCCR0B, R16
+	LDI R16, 100
+	OUT TCNT0, R16
+	//Habilitar interrupciones
+	LDI R16, (1 << TOIE0)
+	STS TIMSK0, R16
+	//SALIDAS//
+	LDI R16, 0b01111111
+	OUT DDRD, R16
+	LDI R16, 0b00001111
+	OUT DDRC, R16
+	LDI R16, 0b00110000
+	OUT PORTC, R16
+	LDI R16, 0b00110000
+	OUT DDRB, R16
+	LDI R17, 0
+	LDI ZH, HIGH(TABLADEC << 1)
+	LDI ZL, LOW(TABLADEC << 1)
+	LPM R18, Z
+	LDI YH, HIGH(TABLAMES << 1)
+	LDI YL, LOW(TABLAMES << 1)
+	LPM L_DIA, Y
+	LDI COUNTUNIT_S, 0
+	LDI COUNTDEC_S, 0
+	LDI COUNTUNIT_MIN, 0
+	LDI COUNTDEC_MIN, 0
+	LDI MES, 0
+	LDI DIA, 1
+	SEI
+///INICIIO DE LOGICA///
+MAIN_LOOP: 
+	CPI R20, 100   // R20 = 100 luego de 1s
+	BREQ LOOP
+	CPI R27, 0
+	BREQ UNIDADES_S
+	CPI R27, 1
+	BREQ DECENAS_S
+	RJMP MAIN_LOOP
+LOOP:
+	//LDI R20, 0
+  
+	INC COUNTUNIT_S
+	CPI COUNTUNIT_S, 10
+	BREQ LIMITU_S
+	RJMP MAIN_LOOP
+//DELMITAR UNIDADES Y DECENAS EN LOS SEGUNDOS
+LIMITU_S: 
+	INC COUNTDEC_S
+	LDI COUNTUNIT_S, 0
+	CPI COUNTDEC_S, 6
+	BREQ LIMITD_S
+	RJMP MAIN_LOOP
+LIMITD_S:
+	INC COUNTUNIT_MIN
+	LDI COUNTUNIT_S, 0
+	LDI COUNTDEC_S, 0
+	CPI COUNTUNIT_MIN, 10
+	BREQ LIMITU_MIN
+	RJMP MAIN_LOOP
+//DELIMITAR UNIDADES Y DECENAS EN LOS MINUTOS
+LIMITU_MIN:
+	INC COUNTDEC_MIN
+	LDI COUNTUNIT_S, 0
+	LDI COUNTDEC_S, 0
+	LDI COUNTUNIT_MIN, 0
+	CPI COUNTDEC_MIN, 6
+	BREQ LIMITD_MIN
+	RJMP MAIN_LOOP
+LIMITD_MIN: 
+	INC COUNTUNIT_H
+	LDI COUNTUNIT_S, 0
+	LDI COUNTDEC_S, 0
+	LDI COUNTUNIT_MIN, 0
+	LDI COUNTDEC_MIN, 0
+	CPI COUNTUNIT_H, 4
+	BREQ LIMITU_H2
+	CPI COUNTUNIT_H, 10
+	BREQ LIMITU_H1
+	RJMP MAIN_LOOP
+//DELIMITAR UNIDADES Y DECENAS EN LAS HORAS
+LIMITU_H1:
+	INC COUNTDEC_H
+	LDI COUNTUNIT_S, 0
+	LDI COUNTDEC_S, 0
+	LDI COUNTUNIT_MIN, 0
+	LDI COUNTDEC_MIN, 0
+	LDI COUNTUNIT_H, 0 
+	CPI COUNTDEC_H, 0
+	RET
+LIMITU_H2:
+	CPI COUNTDEC_H, 2
+	BREQ DIAS_U
+///Aumentar dia resetear horas, minutos y segundos///
+DIAS_U:  
+//aumentar unidades de dia
+	INC DIA
+	CPSE DIA, L_DIA
+	BREQ MESES_U
+	LDI COUNTUNIT_S, 0
+	LDI COUNTDEC_S, 0
+	LDI COUNTUNIT_MIN, 0
+	LDI COUNTDEC_MIN, 0
+	LDI COUNTUNIT_H, 0 
+	CPI COUNTDEC_H, 0
+	RJMP MAIN_LOOP
+DIAS_D:
+//aumentar decenas de dia
+
+///Aumentar dia resetear horas, minutos y segundos///
+MESES_U:
+//aumentar unidades de mes
+
+LIM_MESES:
+	CPI 
+///INTERRUPCION DEL TIMER
+TIMR0_INT:
+	LDI R16, 100
+	OUT TCNT0, R16
+	INC R20
+	RETI
